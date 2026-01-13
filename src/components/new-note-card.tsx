@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 interface Folder {
@@ -12,16 +12,25 @@ interface NewNoteCardProps {
 	onNoteCreated: (content: string, folderId?: string | null) => void;
 	folders?: Folder[];
 	open: boolean;
-	handleOpen: () => void;
+	handleOpen: (open: boolean) => void;
 }
-
-let speechRecognition: SpeechRecognition | null = null;
 
 export function NewNoteCard({ onNoteCreated, folders, open, handleOpen }: NewNoteCardProps) {
 	const [shouldShowOnboarding, setShouldShowOnboarding] = useState(true);
 	const [isRecording, setIsRecording] = useState(false);
 	const [content, setContent] = useState("");
 	const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+	const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
+	const isRecordingRef = useRef(false);
+
+	useEffect(() => {
+		return () => {
+			if (speechRecognitionRef.current) {
+				speechRecognitionRef.current.stop();
+				speechRecognitionRef.current = null;
+			}
+		};
+	}, []);
 
 	function handleStartEditor() {
 		setShouldShowOnboarding(false);
@@ -54,47 +63,102 @@ export function NewNoteCard({ onNoteCreated, folders, open, handleOpen }: NewNot
 			"SpeechRecognition" in window || "webkitSpeechRecognition" in window;
 
 		if (!isSpeechRecognitionAPIAvailable) {
-			alert("Infelizmente seu navegador não suporta a API de gravação!");
+			toast.error("Seu navegador nao suporta a API de gravacao. Use Chrome ou Edge.");
 			return;
 		}
 
+		const navigatorWithBrave = navigator as Navigator & {
+			brave?: { isBrave?: () => Promise<boolean> };
+		};
+
+		navigatorWithBrave.brave
+			?.isBrave?.()
+			.then((isBrave) => {
+				if (isBrave) {
+					toast.warning(
+						"O Brave pode bloquear a gravacao por voz. Se falhar, teste no Chrome.",
+					);
+				}
+			})
+			.catch(() => {});
+
 		setIsRecording(true);
+		isRecordingRef.current = true;
 		setShouldShowOnboarding(false);
 
 		const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-		speechRecognition = new SpeechRecognitionAPI();
+		const startRecognition = () => {
+			if (speechRecognitionRef.current) {
+				speechRecognitionRef.current.stop();
+				speechRecognitionRef.current = null;
+			}
 
-		speechRecognition.lang = "pt-BR";
-		speechRecognition.continuous = true;
-		speechRecognition.maxAlternatives = 1;
-		speechRecognition.interimResults = true;
+			speechRecognitionRef.current = new SpeechRecognitionAPI();
 
-		speechRecognition.onresult = (event) => {
-			const transcription = Array.from(event.results).reduce((text, result) => {
-				return text.concat(result[0].transcript);
-			}, "");
+			speechRecognitionRef.current.lang = "pt-BR";
+			speechRecognitionRef.current.continuous = true;
+			speechRecognitionRef.current.maxAlternatives = 1;
+			speechRecognitionRef.current.interimResults = true;
 
-			setContent(transcription);
+			speechRecognitionRef.current.onresult = (event) => {
+				const transcription = Array.from(event.results).reduce((text, result) => {
+					return text.concat(result[0].transcript);
+				}, "");
+
+				setContent(transcription);
+			};
+
+			speechRecognitionRef.current.onerror = (event) => {
+				console.error(event);
+				if (!isRecordingRef.current) {
+					setIsRecording(false);
+				}
+			};
+
+			speechRecognitionRef.current.onend = () => {
+				if (!isRecordingRef.current) {
+					setIsRecording(false);
+					speechRecognitionRef.current = null;
+					return;
+				}
+
+				setTimeout(() => {
+					if (isRecordingRef.current) {
+						startRecognition();
+					}
+				}, 200);
+			};
+
+			speechRecognitionRef.current.start();
 		};
 
-		speechRecognition.onerror = (event) => {
-			console.error(event);
-		};
-
-		speechRecognition.start();
+		startRecognition();
 	}
 
 	function handleStopRecording() {
 		setIsRecording(false);
+		isRecordingRef.current = false;
 
-		if (speechRecognition !== null) {
-			speechRecognition.stop();
+		if (speechRecognitionRef.current) {
+			speechRecognitionRef.current.stop();
+			speechRecognitionRef.current = null;
 		}
 	}
 
+	function handleDialogOpenChange(nextOpen: boolean) {
+		if (!nextOpen) {
+			handleStopRecording();
+			setContent("");
+			setSelectedFolderId(null);
+			setShouldShowOnboarding(true);
+		}
+
+		handleOpen(nextOpen);
+	}
+
 	return (
-		<Dialog.Root open={open} onOpenChange={handleOpen}>
+		<Dialog.Root open={open} onOpenChange={handleDialogOpenChange}>
 			<Dialog.Trigger className="rounded-md flex flex-col text-left bg-slate-700 p-5 gap-3 outline-none hover:ring-2 hover:ring-slate-600 focus-visible:ring-2 focus-visible:ring-lime-400">
 				<span className="text-sm font-medium text-slate-200">Adicionar nota</span>
 				<p className="text-sm leading-6 text-slate-400">
