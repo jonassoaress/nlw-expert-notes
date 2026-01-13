@@ -67,20 +67,9 @@ export function NewNoteCard({ onNoteCreated, folders, open, handleOpen }: NewNot
 			return;
 		}
 
-		const navigatorWithBrave = navigator as Navigator & {
-			brave?: { isBrave?: () => Promise<boolean> };
-		};
-
-		navigatorWithBrave.brave
-			?.isBrave?.()
-			.then((isBrave) => {
-				if (isBrave) {
-					toast.warning(
-						"O Brave pode bloquear a gravacao por voz. Se falhar, teste no Chrome.",
-					);
-				}
-			})
-			.catch(() => {});
+		toast.warning(
+			"Se a gravacao nao funcionar, tente outro navegador (Chrome recomendado).",
+		);
 
 		setIsRecording(true);
 		isRecordingRef.current = true;
@@ -111,6 +100,16 @@ export function NewNoteCard({ onNoteCreated, folders, open, handleOpen }: NewNot
 
 			speechRecognitionRef.current.onerror = (event) => {
 				console.error(event);
+				if (event.error === "not-allowed") {
+					toast.error("Permita o uso do microfone para gravar a nota.");
+				} else if (event.error === "service-not-allowed") {
+					toast.error(
+						"A gravacao por voz foi bloqueada pelo navegador. Tente no Chrome.",
+					);
+				} else if (event.error !== "no-speech") {
+					toast.error("Falha na gravacao por voz. Tente novamente.");
+				}
+
 				if (!isRecordingRef.current) {
 					setIsRecording(false);
 				}
